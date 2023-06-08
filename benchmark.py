@@ -65,8 +65,11 @@ def auc(ind_conf, ood_conf):
 
 def kl(p, q):
     return np.sum(np.where(p != 0, p * np.log(p / q), 0))
+#endregion
 
-def generalized_gamma_entropy(softmax_id_val, gamma, M):
+
+#region OOD
+def generalized_entropy(softmax_id_val, gamma, M):
         probs =  softmax_id_val 
         probs_sorted = np.sort(probs, axis=1)[:,-M:]
         scores = np.sum(probs_sorted**gamma * (1 - probs_sorted)**(gamma), axis=1)
@@ -77,10 +80,7 @@ def shannon_entropy(softmax_id_val):
         probs =  softmax_id_val 
         scores = np.sum(probs* np.log(probs), axis=1)   
         return scores 
-#endregion
 
-
-#region OOD
 def gradnorm(x, w, b):
     fc = torch.nn.Linear(*w.shape[::-1])
     fc.weight.data[...] = torch.from_numpy(w)
@@ -284,9 +284,9 @@ def main():
     method = 'Generalized entropy (GEN)'
     print(f'\n{method}')
     result = []
-    score_id = generalized_gamma_entropy(softmax_id_val, args.gamma, args.M)
+    score_id = generalized_entropy(softmax_id_val, args.gamma, args.M)
     for name, softmax_ood in softmax_oods.items():
-        score_ood = generalized_gamma_entropy(softmax_ood, args.gamma, args.M)
+        score_ood = generalized_entropy(softmax_ood, args.gamma, args.M)
         auc_ood = auc(score_id, score_ood)[0]
         fpr_ood, _ = fpr_recall(score_id, score_ood, recall)
         result.append(dict(method=method, oodset=name, auroc=auc_ood, fpr=fpr_ood))
@@ -295,6 +295,36 @@ def main():
     dfs.append(df)
     print(f'mean auroc {df.auroc.mean():.2%}, {df.fpr.mean():.2%}')
     
+
+    # -------------------------------------------
+    method = 'GEN + Residual'
+    print(f'\n{method}')
+    result = []
+   
+    DIM = 1000 if feature_id_val.shape[-1] >= 2048 else 512
+    print(f'{DIM=}')
+
+    print('computing principal space...')
+    ec = EmpiricalCovariance(assume_centered=True)
+    ec.fit(feature_id_train - u)
+    eig_vals, eigen_vectors = np.linalg.eig(ec.covariance_)
+    NS = np.ascontiguousarray((eigen_vectors.T[np.argsort(eig_vals * -1)[DIM:]]).T)
+
+    residual_score_id = norm(np.matmul(feature_id_val - u, NS), axis=-1)
+    GEN_score_id = generalized_entropy(softmax_id_val, args.gamma, args.M)
+    score_id =  residual_score_id*GEN_score_id
+    for name, softmax_ood, feature_ood in zip(ood_names, softmax_oods.values(), feature_oods.values()):
+        residual_score_ood = norm(np.matmul(feature_ood - u, NS), axis=-1)
+        GEN_score_ood = generalized_entropy(softmax_ood, args.gamma, args.M)
+        score_ood = residual_score_ood*GEN_score_ood
+        auc_ood = auc(score_id, score_ood)[0]
+        fpr_ood, _ = fpr_recall(score_id, score_ood, recall)
+        result.append(dict(method=method, oodset=name, auroc=auc_ood, fpr=fpr_ood))
+        print(f'{method}: {name} auroc {auc_ood:.2%}, fpr {fpr_ood:.2%}')
+    df = pd.DataFrame(result)
+    dfs.append(df)
+    print(f'mean auroc {df.auroc.mean():.2%}, {df.fpr.mean():.2%}')
+
     # -------------------------------------------
     method = 'Local React'
     print(f'\n{method}')
@@ -304,7 +334,6 @@ def main():
     print(f'clip quantile local {args.clip_quantile_local}, clip {clip:.4f}')
 
     logit_id_val_clip = np.clip(feature_id_val, a_min=None, a_max=clip) @ w.T + b
-     
     score_id = logsumexp(logit_id_val_clip, axis=-1)
     for name, feature_ood in feature_oods.items():
         clip_ood = np.quantile(feature_ood, q=args.clip_quantile_local)
@@ -329,12 +358,12 @@ def main():
 
     logit_id_val_clip = np.clip(feature_id_val, a_min=None, a_max=clip) @ w.T + b
     softmax_id_val = softmax(logit_id_val_clip, axis=-1)
-    score_id = generalized_gamma_entropy(softmax_id_val, args.gamma, args.M)
+    score_id = generalized_entropy(softmax_id_val, args.gamma, args.M)
     for name, feature_ood in feature_oods.items():
         clip_ood = np.quantile(feature_ood, q=args.clip_quantile_local)
         logit_ood_clip = np.clip(feature_ood, a_min=None, a_max=clip_ood) @ w.T + b
         softmax_ood = softmax(logit_ood_clip, axis=-1)
-        score_ood = generalized_gamma_entropy(softmax_ood, args.gamma, args.M)
+        score_ood = generalized_entropy(softmax_ood, args.gamma, args.M)
         auc_ood = auc(score_id, score_ood)[0]
         fpr_ood, _ = fpr_recall(score_id, score_ood, recall)
         result.append(dict(method=method, oodset=name, auroc=auc_ood, fpr=fpr_ood))
@@ -343,7 +372,7 @@ def main():
     dfs.append(df)
     print(f'mean auroc {df.auroc.mean():.2%}, {df.fpr.mean():.2%}')
 
-
+    
     # -------------------------------------------
     method = 'GEN + React'
     print(f'\n{method}')
@@ -354,42 +383,11 @@ def main():
 
     logit_id_val_clip = np.clip(feature_id_val, a_min=None, a_max=clip) @ w.T + b
     softmax_id_val = softmax(logit_id_val_clip, axis=-1)
-    score_id = generalized_gamma_entropy(softmax_id_val, args.gamma, args.M)
+    score_id = generalized_entropy(softmax_id_val, args.gamma, args.M)
     for name, feature_ood in feature_oods.items():
         logit_ood_clip = np.clip(feature_ood, a_min=None, a_max=clip) @ w.T + b
         softmax_ood = softmax(logit_ood_clip, axis=-1)
-        score_ood = generalized_gamma_entropy(softmax_ood, args.gamma, args.M)
-        auc_ood = auc(score_id, score_ood)[0]
-        fpr_ood, _ = fpr_recall(score_id, score_ood, recall)
-        result.append(dict(method=method, oodset=name, auroc=auc_ood, fpr=fpr_ood))
-        print(f'{method}: {name} auroc {auc_ood:.2%}, fpr {fpr_ood:.2%}')
-    df = pd.DataFrame(result)
-    dfs.append(df)
-    print(f'mean auroc {df.auroc.mean():.2%}, {df.fpr.mean():.2%}')
-
-
-    # -------------------------------------------
-    method = 'GEN + Residual'
-    print(f'\n{method}')
-    result = []
-   
-    DIM = 1000 if feature_id_val.shape[-1] >= 2048 else 512
-    print(f'{DIM=}')
-
-    print('computing principal space...')
-    ec = EmpiricalCovariance(assume_centered=True)
-    ec.fit(feature_id_train - u)
-    eig_vals, eigen_vectors = np.linalg.eig(ec.covariance_)
-    NS = np.ascontiguousarray((eigen_vectors.T[np.argsort(eig_vals * -1)[DIM:]]).T)
-
-    residual_score_id = norm(np.matmul(feature_id_val - u, NS), axis=-1)
-
-    GEN_score_id = generalized_gamma_entropy(softmax_id_val, args.gamma, args.M)
-    score_id =  residual_score_id*GEN_score_id
-    for name, softmax_ood, feature_ood in zip(ood_names, softmax_oods.values(), feature_oods.values()):
-        residual_score_ood = norm(np.matmul(feature_ood - u, NS), axis=-1)
-        GEN_score_ood = generalized_gamma_entropy(softmax_ood, args.gamma, args.M)
-        score_ood = residual_score_ood*GEN_score_ood
+        score_ood = generalized_entropy(softmax_ood, args.gamma, args.M)
         auc_ood = auc(score_id, score_ood)[0]
         fpr_ood, _ = fpr_recall(score_id, score_ood, recall)
         result.append(dict(method=method, oodset=name, auroc=auc_ood, fpr=fpr_ood))
@@ -458,7 +456,6 @@ def main():
     mean_softmax_train = [softmax_id_train[pred_labels_train==i].mean(axis=0) for i in tqdm(range(1000))]
 
     score_id = -pairwise_distances_argmin_min(softmax_id_val, np.array(mean_softmax_train), metric=kl)[1]
-
     for name, softmax_ood in softmax_oods.items():
         score_ood = -pairwise_distances_argmin_min(softmax_ood, np.array(mean_softmax_train), metric=kl)[1]
         auc_ood = auc(score_id, score_ood)[0]
@@ -470,6 +467,8 @@ def main():
     print(f'mean auroc {df.auroc.mean():.2%}, {df.fpr.mean():.2%}')
      
      
+   
+
 
 
 
