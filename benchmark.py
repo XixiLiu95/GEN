@@ -295,6 +295,54 @@ def main():
     dfs.append(df)
     print(f'mean auroc {df.auroc.mean():.2%}, {df.fpr.mean():.2%}')
     
+    # -------------------------------------------
+    method = 'Local React'
+    print(f'\n{method}')
+    result = []
+   
+    clip = np.quantile(feature_id_val, q=args.clip_quantile_local)
+    print(f'clip quantile local {args.clip_quantile_local}, clip {clip:.4f}')
+
+    logit_id_val_clip = np.clip(feature_id_val, a_min=None, a_max=clip) @ w.T + b
+     
+    score_id = logsumexp(logit_id_val_clip, axis=-1)
+    for name, feature_ood in feature_oods.items():
+        clip_ood = np.quantile(feature_ood, q=args.clip_quantile_local)
+        logit_ood_clip = np.clip(feature_ood, a_min=None, a_max=clip_ood) @ w.T + b
+        score_ood = logsumexp(logit_ood_clip, axis=-1)
+        auc_ood = auc(score_id, score_ood)[0]
+        fpr_ood, _ = fpr_recall(score_id, score_ood, recall)
+        result.append(dict(method=method, oodset=name, auroc=auc_ood, fpr=fpr_ood))
+        print(f'{method}: {name} auroc {auc_ood:.2%}, fpr {fpr_ood:.2%}')
+    df = pd.DataFrame(result)
+    dfs.append(df)
+    print(f'mean auroc {df.auroc.mean():.2%}, {df.fpr.mean():.2%}')
+    
+     
+    # -------------------------------------------
+    method = 'GEN + Local React'
+    print(f'\n{method}')
+    result = []
+   
+    clip = np.quantile(feature_id_val, q=args.clip_quantile_local)
+    print(f'clip quantile local {args.clip_quantile_local}, clip {clip:.4f}')
+
+    logit_id_val_clip = np.clip(feature_id_val, a_min=None, a_max=clip) @ w.T + b
+    softmax_id_val = softmax(logit_id_val_clip, axis=-1)
+    score_id = generalized_gamma_entropy(softmax_id_val, args.gamma, args.M)
+    for name, feature_ood in feature_oods.items():
+        clip_ood = np.quantile(feature_ood, q=args.clip_quantile_local)
+        logit_ood_clip = np.clip(feature_ood, a_min=None, a_max=clip_ood) @ w.T + b
+        softmax_ood = softmax(logit_ood_clip, axis=-1)
+        score_ood = generalized_gamma_entropy(softmax_ood, args.gamma, args.M)
+        auc_ood = auc(score_id, score_ood)[0]
+        fpr_ood, _ = fpr_recall(score_id, score_ood, recall)
+        result.append(dict(method=method, oodset=name, auroc=auc_ood, fpr=fpr_ood))
+        print(f'{method}: {name} auroc {auc_ood:.2%}, fpr {fpr_ood:.2%}')
+    df = pd.DataFrame(result)
+    dfs.append(df)
+    print(f'mean auroc {df.auroc.mean():.2%}, {df.fpr.mean():.2%}')
+
 
     # -------------------------------------------
     method = 'GEN + React'
