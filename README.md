@@ -114,7 +114,7 @@ Note: To reproduce ODIN baseline, please refer to [this repo](https://github.com
 ```
 @inproceedings{xixi2023GEN,
 title = {GEN: Pushing the Limits of Softmax-Based Out-of-Distribution Detection},
-author = {Liu, Xixi and Lochman, Yaroslava and Chrsitopher, Zach},
+author = {Liu, Xixi and Lochman, Yaroslava and Christopher, Zach},
 booktitle = {Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition},
 year = {2023}
 }
